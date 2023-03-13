@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>ReSwitched Weekly</title>
+    <link rel="stylesheet" href="{{ get_url(path="base.css") }}">
+    
+</head>
+
+<body>
+    <div id="header">
+        <nav>
+        <a href="{{ get_url(path='@/about.md') }}">About</a>
+        <a href="{{ get_url(path='@/posts/_index.md') }}">Blog</a>
+        <a href="{{ get_url(path='@/tags.md') }}">Tags</a></nav>
+    </div>
+    <main>
+        {%- block content %}
+        {%- endblock content %}
+    </main>
+    <div id="footer"></div>
+</body>
+
+</html>

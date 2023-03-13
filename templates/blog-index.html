@@ -1,0 +1,24 @@
+{%- extends "base.html" %}
+{% block content %}
+<div class="posts">
+    {% for page in paginator.pages %}
+        <article class="posts">
+            <h1><a href= "{{page.permalink}}">{{ page.title }}</a></h1>
+            <div class="post__summary">
+                {{ page.summary | safe }}
+            </div>
+            <div class="read-more">
+                <a href="{{ page.permalink }}">Read more...</a>
+            </div>
+        </article>
+    {% endfor %}
+</div>
+<nav class="pagination">
+    {% if paginator.previous %}
+        <a class="previous" href="{{ paginator.previous }}">‹ Previous</a>
+    {% endif %}
+    {% if paginator.next %}
+        <a class="next" href="{{ paginator.next }}">Next ›</a>
+    {% endif %}
+</nav>
+{% endblock content %}
