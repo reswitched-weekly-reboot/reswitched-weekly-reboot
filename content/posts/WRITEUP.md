@@ -20,7 +20,7 @@ Apparently, it's a stripped 32-bit ARM binary. Let's open it up in our favorite 
 
 Come along with me as we partake in a journey to discover the flag hidden inside. Along the way I'll show you my thought process of the intended solution, and how a few rookie mistakes along the way made it significantly harder than intended to solve. While reading, keep in mind that this was intended to be a moderately difficult CTF challenge, maybe 6/10, with *one* interesting twist.
 
-![What mysteries await within?](https://upload.wikimedia.org/wikipedia/commons/f/f0/Nintendo-3DS-AquaOpen.jpg)
+![What mysteries await within?](https://upload.wikimedia.org/wikipedia/commons/thumb/f/f0/Nintendo-3DS-AquaOpen.jpg/531px-Nintendo-3DS-AquaOpen.jpg)
 
 ## First Steps
 Let's revisit those hints:
@@ -236,4 +236,4 @@ Reflecting on the value of writing, it's interesting that in terms of pure time 
 
 If you've made it to the end of this article, I applaud your interest (or possible insanity). There will be more articles to come soon on some challenges I wrote earlier in 2022. In order to whet your appetite, I'll share the following teaser:
 
-![Teaser](https://upload.wikimedia.org/wikipedia/commons/1/15/Intel_Itanium_logo.svg)
+![Teaser](https://upload.wikimedia.org/wikipedia/commons/thumb/1/15/Intel_Itanium_logo.svg/394px-Intel_Itanium_logo.svg.png)
