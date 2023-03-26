@@ -4,7 +4,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     permissions: write-all
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/ghpages'
     steps:
       - name: checkout
         uses: actions/checkout@v3.0.0
