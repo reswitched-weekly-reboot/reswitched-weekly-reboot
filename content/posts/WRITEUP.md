@@ -10,13 +10,13 @@ bootstrap = true
 
 If you attended a certain hackathon late last year, you might have noticed a challenge listed like this:
 
-![Image of the CTF Challenge](/assets/images/3ds-ctf/Challenge_Title.png)
+![Image of the CTF Challenge](/reswitched-weekly-reboot.github.io/assets/images/3ds-ctf/Challenge_Title.png)
 
 You're given an ELF file and a mysterious "file.bin". What wonders lie within?
 
 Apparently, it's a stripped 32-bit ARM binary. Let's open it up in our favorite decompiler and...
 
-![Oh my.](/assets/images/3ds-ctf/Decompiled_View_Initial.png)
+![Oh my.](/reswitched-weekly-reboot.github.io/assets/images/3ds-ctf/Decompiled_View_Initial.png)
 
 Come along with me as we partake in a journey to discover the flag hidden inside. Along the way I'll show you my thought process of the intended solution, and how a few rookie mistakes along the way made it significantly harder than intended to solve. While reading, keep in mind that this was intended to be a moderately difficult CTF challenge, maybe 6/10, with *one* interesting twist.
 
