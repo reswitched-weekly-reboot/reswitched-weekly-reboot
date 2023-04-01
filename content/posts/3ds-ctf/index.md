@@ -10,13 +10,15 @@ bootstrap = true
 
 If you attended a certain hackathon late last year, you might have noticed a challenge listed like this:
 
-![Image of the CTF Challenge](/reswitched-weekly-reboot.github.io/assets/images/3ds-ctf/Challenge_Title.png)
+![Image of the CTF Challenge](Challenge_Title.png)
 
 You're given an ELF file and a mysterious "file.bin". What wonders lie within?
 
 Apparently, it's a stripped 32-bit ARM binary. Let's open it up in our favorite decompiler and...
 
-![Oh my.](/reswitched-weekly-reboot.github.io/assets/images/3ds-ctf/Decompiled_View_Initial.png)
+![View of the initial decompiled view in the Ghidra decompiler, intended to be viewed as gibberish.](Decompiled_View_Initial.png)
+
+Oh my.
 
 Come along with me as we partake in a journey to discover the flag hidden inside. Along the way I'll show you my thought process of the intended solution, and how a few rookie mistakes along the way made it significantly harder than intended to solve. While reading, keep in mind that this was intended to be a moderately difficult CTF challenge, maybe 6/10, with *one* interesting twist.
 
@@ -177,7 +179,7 @@ With a little bit of elbow grease, and an installation of devkitARM as the chall
 ### Aside: How to un-swizzle data
 Writing this challenge requiring that I convert the code using the inverse of the swizzling function first, since F(F'(x)) = x. I started out by attempting to use tex3ds' [inverse swizzler](https://github.com/devkitPro/tex3ds/blob/master/source/swizzle.cpp#L28), but I couldn't get it quite right. While bashing my head against the wall, I inadventently nerd-sniped [DeltaV](https://github.com/LiquidFenrir) into performing a detailed, graphical series of tests on the GPU to see how flags affected the display transfer engine, and the results were quite interesting... 
 
-![Results of the experiments](/assets/images/3ds-ctf/Display_Transfer_Experiments.png)
+![Results of the experiments. Many images are shown, showcasing the results of the Display Transfer and Texture Copy operations with each permutation of the RAW and TILED flags.](Display_Transfer_Experiments.png)
 
 This image showcases the results of the outputs of each combination of flags with ``GX_DisplayTransfer`` and its close cousin ``GX_TextureCopy`` (which is another DMA function for slightly different purposes.) Input into each is a swizzled texture, now let's take a look right-to-left at the results...
 
