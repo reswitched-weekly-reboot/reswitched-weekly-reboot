@@ -1,5 +1,5 @@
 +++
-title = "Making a CTF Challenge for the Nintendo 3DS"
+title = "A CTF Challenge using the Nintendo 3DS' unique features"
 template = "bootstrap-page.html"
 authors = ["Swiftloke"]
 date = 2023-04-02
@@ -36,7 +36,7 @@ Let's revisit those hints:
 
 The challenges target platform has already been spoiled by the title, but if one looked it up they'd find that devkitARM is a complete toolchain for Nintendo handheld consoles, including the GBA, DS, and 3DS. 
 
-As for those logs... We can immediately see that "romfs:/file.bin" is an argument to a function. That means it's fopen, and that the return value is a file pointer... We'll come back to that shortly.
+As for those logs... It's probably meant that "key intersections" means critical sections of the program flow. For the first of these, we can immediately see that "romfs:/file.bin" is an argument to a function. That means it's fopen, and that the return value is a file pointer... We'll come back to that shortly.
 
 ``GX_DisplayTransfer`` sounds like the name of the previous function. Plug that into our search engine and we get linked [directly to some documentation](https://libctru.devkitpro.org/gx_8h.html). Looks like the function is from libctru, which is the [user-mode library for writing useful homebrew on the 3DS](https://libctru.devkitpro.org/index.html). Now what's that function do...?
 
@@ -44,7 +44,7 @@ As for those logs... We can immediately see that "romfs:/file.bin" is an argumen
 
 Well, that's not very helpful, but this is a "key intersection", so it's probably really important to understand this function.
 
-The first major hurdle, and an unintended one, is that this functions utility isn't a mere search away. I spent quite a long time tinkering with 3DS homebrew, writing my own competent [2D renderer](https://github.com/Swiftloke/ModMoon/tree/master/source/sdraw) using the custom graphics API exposed with [citro3d](https://github.com/devkitPro/citro3d), so of course *I* know what ``GX_DisplayTransfer`` does, but it'll take some digging to discern its intentions for yourself. The average reverse engineer might find a few [examples](https://github.com/SVatG/SkateStation/blob/master/EffectCoolCube2.c#L176) online (I'm linking to one I found randomly), but they might not know to [search 3dbrew](https://www.3dbrew.org/wiki/GPU/External_Registers#Transfer_Engine), a knowledge base of 3DS reverse engineering, and then read between the lines to determine that this is a DMA copy function.
+By finding an [example](https://github.com/SVatG/SkateStation/blob/master/EffectCoolCube2.c#L176) online (I'm linking to one I found randomly), and [searching 3dbrew](https://www.3dbrew.org/wiki/GPU/External_Registers#Transfer_Engine), a knowledge base of 3DS reverse engineering, then reading between the lines, one can determine that this is a DMA copy function.
 
 ## DMA on the 3DS
 Those familiar with computer architecture will know that a DMA engine is, in brief terms, an auxilliary device that can transfer large amounts of data without the CPUs involvement, freeing it up to perform more useful work. On the 3DS, the DMA engine is treated as part of the GPU, and is commonly used to upload textures to VRAM quickly. 
@@ -59,11 +59,11 @@ One noteworthy aspect of this, at least here, is that Ghidra mistakenly types th
 
 {{ embedcode(path="/assets/code/3ds-ctf/reverse_start/5.c.md") }}
 ## Executable mapping?
-The next major failure creating this challenge was here. The other "key intersection" is a bit further down:
+The other "key intersection" referred to in the logs is a bit further down:
 
 - Executable mirroring of read-write page returned page %p\n
 
-I intended for this segment of the code to be *completely ignored*, because it's a lot of function calls towards something that's meant to be largely overlooked. However, I believe that this was not made clear enough. Another hint along the lines of ``Beginning to map DisplayTransfer result as executable...`` may have significantly improved the situation.
+I intended for this segment of the code to be *completely ignored*, because it's a lot of function calls towards something that's meant to be largely overlooked. However, I believe that this was not made clear enough.
 
 Here's what that block looks like in the source code:
 
@@ -98,7 +98,7 @@ The main loop of the program is another subtle mistake, meant to be trivial to u
 
 One thing we are able to see is that somehow, if the loop exits correctly, ``local_5c`` must contain the output flag. But what's all the rest?
 
-If I had only stated that ``FUN_0010810c`` was ``hidKeysDown()``, the 3DS function which gets the buttons that were just pressed, this would have instantly become clear as day. The main loop passes through the buttons pressed this frame, and somehow expects the executable code to spit out the flag if a certain button combination was pressed. Ghidra is actually mis-decompiling this code pointer call; the program does pass ``flag_buffer`` as a parameter, so I had to override the function signature to produce the correct output.
+If you can figure out that ``FUN_0010810c`` is ``hidKeysDown()``, the 3DS function which gets the buttons that were just pressed, this would have instantly become clear as day. However, ascertaining this is not a trivial task, which I'll discuss in more detail shortly. The main loop passes through the buttons pressed this frame, and somehow expects the executable code to spit out the flag if a certain button combination was pressed. Ghidra is actually mis-decompiling this code pointer call; the program does pass ``flag_buffer`` as a parameter, so I had to override the function signature to produce the correct output.
 
 {{ tabspills(tablist="reverse_main_loop", lan="c", val=["a1","a2"], path=["/assets/code/3ds-ctf/reverse_main_loop/2.c.md","/assets/code/3ds-ctf/reverse_main_loop/3.c.md"]) }}
 
@@ -121,7 +121,13 @@ It couldn't be that easy, right? After the accidentally substantial reverse engi
 ## Intermission- An Accidental Odyssey
 This challenge was designed to have almost all of the information above available to you from the beginning. You were intended to learn that the file was opened, read in, fed to ``GX_DisplayTransfer`` (you were still intended to learn the meaning of that function on your own) and finally mapped as executable and run. Instead, it took careful, painful reverse engineering, with a lot of insight and guesswork. What went wrong?
 
-The problem was that this challenge stripped *symbols* from the binary, the strings that identify the meanings of a function. While designing this challenge, I was running up against the deadline to the CTF and needed a way to prevent the challenge from simply being run on a real 3DS. After all, since the code is clearly valid by the time it's executed, one could simply attach a debugger to the running process and dump the code at that time.
+The first major hurdle is that the meaning of ``GX_DisplayTransfer``, which is not a mere search away. I spent quite a long time tinkering with 3DS homebrew, writing my own competent [2D renderer](https://github.com/Swiftloke/ModMoon/tree/master/source/sdraw) using the custom graphics API exposed with [citro3d](https://github.com/devkitPro/citro3d), so of course *I* know what ``GX_DisplayTransfer`` does, but it takes a fair bit of reading to ascertain its meaning for yourself, and even then it might not be clear what the function is. I mentioned 3dbrew earlier; the average reverse engineer might not come across that treasure trove of information.
+
+The next problem was with the RW->RX remapping. As aforementioned, I intended for that segment to be entirely ignored by the reverse engineer, but the way the logs were actually written meant that the hint was almost certainly not clear enough. Another hint along the lines of ``Beginning to map DisplayTransfer result as executable...`` may have significantly improved the situation.
+
+Another major problem was failing to properly explain that the unknown function in the main loop was ``hidKeysDown()``. My challenge design revolved around people knowing that this was the function in question. I completely failed to elaborate on this, and the challenge was made much less clear as a result.
+
+Finally, this challenge stripped *symbols* from the binary, the strings that identify the meanings of a function. While designing this challenge, I was running up against the deadline to the CTF and needed a way to prevent the challenge from simply being run on a real 3DS. After all, since the code is clearly valid by the time it's executed, one could simply attach a debugger to the running process and dump the code at that time.
 
 Without any better ideas, I provided a stripped .ELF file as the binary. Without symbols, the devkitARM toolchain can't build it into an executable image. One of the more saavy people who attempted this challenge made many attempts to get it to run without progress; I figure at that rate, anyone who did manage to execute it deserves their flag... But at what cost? Recall that this was meant to be a "6/10" challenge, *run as a side event during a hackathon*, with one neat twist to discover; instead, it required a mountain of reverse engineering to even get far enough to discover the twist. Only one person got far enough to even consider uncovering the secret, and only long after the CTF had ended when they continued grinding away at it.
 
@@ -143,7 +149,7 @@ Perhaps the name of the challenge would help guide the way?
 
 If you guessed "It's the DMA function", congratulations! You've been paying attention. If you skipped straight to the answer, well, I get it.
 
-The PICA200 GPU in the 3DS employs swizzling, or tiling, in its texturing pipeline. This is fairly confusing terminology, as both of these phrases have multiple other uses in the realm of graphics (see vertex swizzling, i.e. ``vertex.xyz = vertex.zxy`` and tile-based rendering, a [type of GPU design well-suited to low-power environments](https://interactive.arm.com/story/the-arm-manga-guide-to-the-mali-gpu/)). In this context, swizzling means that texture memory is physically stored differently than would appear logical to the human eye. This is done for the purposes of spatial locality- if you re-arrange the data, you're able increase your cache hit rate and therefore make fewer (and costlier) trips to main memory.
+The PICA200 GPU in the 3DS employs swizzling in its texturing pipeline. This is fairly confusing terminology, as this phrase has multiple other uses in the realm of graphics (see vertex swizzling, i.e. ``vertex.xyz = vertex.zxy``). In this context, swizzling means that texture memory is physically stored differently than would appear logical to the human eye. This is done for the purposes of spatial locality- if you re-arrange the data, you're able increase your cache hit rate and therefore make fewer (and costlier) trips to main memory.
 
 ![View of a normal texture versus its swizzled representation, showing how the image is garbled to the human eye](Normal_Versus_Swizzled.png)
 
