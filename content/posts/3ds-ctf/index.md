@@ -2,7 +2,7 @@
 title = "A CTF Challenge using the Nintendo 3DS' unique features"
 template = "bootstrap-page.html"
 authors = ["Swiftloke"]
-date = 2023-04-02
+date = 2023-04-09
 [extras]
 bootstrap = true
 +++
