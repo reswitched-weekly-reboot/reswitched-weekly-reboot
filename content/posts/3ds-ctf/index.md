@@ -32,7 +32,7 @@ For those following along at home, you can download the challenge [here](Distrib
 ## First Steps
 Let's revisit those hints:
 
-``> Looks like he left some logs at key intersections... Installing devkitARM may prove beneficial.``
+> Looks like he left some logs at key intersections... Installing devkitARM may prove beneficial.
 
 The challenges target platform has already been spoiled by the title, but if one looked it up they'd find that devkitARM is a complete toolchain for Nintendo handheld consoles, including the GBA, DS, and 3DS. 
 
@@ -40,7 +40,7 @@ As for those logs... It's probably meant that "key intersections" means critical
 
 ``GX_DisplayTransfer`` sounds like the name of the previous function. Plug that into our search engine and we get linked [directly to some documentation](https://libctru.devkitpro.org/gx_8h.html). Looks like the function is from libctru, which is the [user-mode library for writing useful homebrew on the 3DS](https://libctru.devkitpro.org/index.html). Now what's that function do...?
 
-``> Initiates a display transfer.``
+> Initiates a display transfer.
 
 Well, that's not very helpful, but this is a "key intersection", so it's probably really important to understand this function.
 
@@ -61,7 +61,7 @@ One noteworthy aspect of this, at least here, is that Ghidra mistakenly types th
 ## Executable mapping?
 The other "key intersection" referred to in the logs is a bit further down:
 
-``> Executable mirroring of read-write page returned page %p\n``
+> Executable mirroring of read-write page returned page %p\n
 
 I intended for this segment of the code to be *completely ignored*, because it's a lot of function calls towards something that's meant to be largely overlooked. However, I believe that this was not made clear enough.
 
@@ -89,7 +89,7 @@ It's now time to explain what this does. The 3DS, like all contemporary operatin
 
 It's important to remember while reading the rest of this article that *code is data*. For example, each single ARM instruction (add, subtract, multiply, compare, branch...) is a series of four bytes, decoded and executed by the processor. As [Wikipedia](https://en.wikipedia.org/wiki/Code_as_data) puts it:
 
-``> Code-as-data is also a principle of the Von Neumann architecture, since stored programs and data are both represented as bits in the same memory device. This architecture offers the ability to write self-modifying code. It also opens the security risk of disguising a malicious program as user data and then using an exploit to direct execution to the malicious program.``
+> Code-as-data is also a principle of the Von Neumann architecture, since stored programs and data are both represented as bits in the same memory device. This architecture offers the ability to write self-modifying code. It also opens the security risk of disguising a malicious program as user data and then using an exploit to direct execution to the malicious program.
 
 ## The Main Loop
 The main loop of the program is another subtle mistake, meant to be trivial to understand but in reality frustrating. 
@@ -155,7 +155,7 @@ The PICA200 GPU in the 3DS employs swizzling in its texturing pipeline. This is 
 
 So what does this have to do with a DMA transfer? Well, earlier it was stated that
 
-`` > We also see a ``flags`` value of 2, which probably isn't important, right?``
+ > We also see a ``flags`` value of 2, which probably isn't important, right?
 
 Maybe it is important. Let's check that documentation a little more closely... We can see a [list of transfer flags](https://libctru.devkitpro.org/gx_8h.html#a19b4c4ad91299256a7c285e9ba7673b9) here (which you'd be able to understand were transfer flags by looking at [the example](https://github.com/SVatG/SkateStation/blob/2818789c6d060a0144bb23af8de997d2ed9106b5/source/Tools.h#L54)). That ``GX_TRANSFER_OUT_TILED(x)`` flag is in fact referring to the very same form of tiling! The DMA engine on the 3DS has some functionality that allows it to, during the copy process, re-arrange data that is laid out in the way one expects into the way the GPU expects it. This can be used to load textures at runtime; think ports of games in which ahead-of-time translation isn't possible, or very bad code which decodes and loads PNG files at runtime instead of AoT conversion. (The latter was the de-facto standard while writing 3DS homebrew for a few years before the [tex3ds](https://github.com/devkitPro/tex3ds) project came out.) 
 
