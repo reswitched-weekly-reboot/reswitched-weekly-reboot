@@ -1,0 +1,6 @@
+<p>
+    <a class="btn btn-primary" data-bs-toggle="collapse" href="#multiCollapseExample{{nth}}" role="button" aria-expanded="false" aria-controls="multiCollapseExample1">{{value}}</a>
+</p>
+<div class="collapse" style="overflow-y: scroll; max-height: 500px;" id="multiCollapseExample{{nth}}">{% set data = load_data(path=path) -%}
+    {{data | markdown | safe}}
+</div>

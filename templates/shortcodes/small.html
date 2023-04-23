@@ -1,0 +1,3 @@
+<div  style="overflow-y: scroll; max-height: 500px;">{% set data = load_data(path=path) -%}
+    {{data | markdown | safe}}
+</div>

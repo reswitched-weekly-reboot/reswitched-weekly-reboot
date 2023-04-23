@@ -1,0 +1,15 @@
+<ul class="nav nav-tabs" id="{{tablist}}" role="tablist">
+    {% for v in val %}
+    <li class="nav-item" role="presentation">
+      <button class="nav-link {% if loop.first %}active {% endif%}" id="{{v}}-tab" data-bs-toggle="tab" data-bs-target="#{{v}}" type="button" role="tab" aria-controls="home" aria-selected="true">{{v}}</button>
+    </li>
+    {% endfor %}
+</ul>
+<div class="tab-content">
+    {% for x in path%}
+    {% set data = load_data(path=x) %}
+    <div class="tab-pane {% if loop.first %}active {% endif%}" id="{{val | nth(n=loop.index0)}}" role="tabpanel" aria-labelledby="{{val | nth(n=loop.index0)}}-tab">
+        {{data | markdown | safe}}
+    </div>
+    {% endfor %}
+</div>
