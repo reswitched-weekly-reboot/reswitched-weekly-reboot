@@ -1,0 +1,1055 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>ReSwitched Weekly</title>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/js/bootstrap.bundle.min.js" integrity="sha384-MrcW6ZMFYlzcLA8Nl+NtUVF0sA7MsXsP1UyJoMp4YLEuNSfAP+JcXn/tWtIaxVXM" crossorigin="anonymous"></script>
+
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+
+    <link rel="stylesheet" href="https://reswitched-weekly-reboot.github.io/base.css">
+</head>
+
+<body>
+    <div id="header">
+        <nav>
+        <a href="https://reswitched-weekly-reboot.github.io/about/">About</a>
+        <a href="https://reswitched-weekly-reboot.github.io/posts/">Blog</a>
+        <a href="https://reswitched-weekly-reboot.github.io/tags/">Tags</a></nav>
+    </div>
+    <main>
+<h1>A CTF Challenge using the Nintendo 3DS&#x27; unique features</h1>
+<article>
+    <p>Or, how to make your CTF challenge <em>much</em> harder than intended. This long-form article written by <a href="https://github.com/swiftloke/">Swiftloke</a> describes an usual CTF challenge he wrote last year.</p>
+<span id="continue-reading"></span>
+<p>If you attended a certain hackathon late last year, you might have noticed a challenge listed like this:</p>
+<p><img src="https://reswitched-weekly-reboot.github.io/posts/3ds-ctf/Challenge_Title.png" alt="Image of the CTF Challenge" /></p>
+<p>You're given an ELF file and a mysterious &quot;file.bin&quot;. What wonders lie within?</p>
+<p>Apparently, it's a stripped 32-bit ARM binary. Let's open it up in our favorite decompiler and...</p>
+<p><img src="https://reswitched-weekly-reboot.github.io/posts/3ds-ctf/Decompiled_View_Initial.png" alt="View of the initial decompiled view in the Ghidra decompiler, intended to be viewed as gibberish." /></p>
+<p>Oh my.</p>
+<p>Come along with me as we partake in a journey to discover the flag hidden inside. Along the way I'll show you my thought process of the intended solution, and how a few rookie mistakes along the way made it significantly harder than intended to solve. While reading, keep in mind that this was intended to be a moderately difficult CTF challenge, maybe 6/10, with <em>one</em> interesting twist.</p>
+<p>For those following along at home, you can download the challenge <a href="Distributable_Challenge.zip">here</a>.</p>
+<p><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/f/f0/Nintendo-3DS-AquaOpen.jpg/531px-Nintendo-3DS-AquaOpen.jpg" alt="An image of the Nintendo 3DS." /></p>
+<h2 id="first-steps"><a class="zola-anchor" href="#first-steps" aria-label="Anchor link for: first-steps">First Steps</a></h2>
+<p>Let's revisit those hints:</p>
+<blockquote>
+<p>Looks like he left some logs at key intersections... Installing devkitARM may prove beneficial.</p>
+</blockquote>
+<p>The challenges target platform has already been spoiled by the title, but if one looked it up they'd find that devkitARM is a complete toolchain for Nintendo handheld consoles, including the GBA, DS, and 3DS. </p>
+<p>As for those logs... It's probably meant that &quot;key intersections&quot; means critical sections of the program flow. For the first of these, we can immediately see that &quot;romfs:/file.bin&quot; is an argument to a function. That means it's fopen, and that the return value is a file pointer... We'll come back to that shortly.</p>
+<p><code>GX_DisplayTransfer</code> sounds like the name of the previous function. Plug that into our search engine and we get linked <a href="https://libctru.devkitpro.org/gx_8h.html">directly to some documentation</a>. Looks like the function is from libctru, which is the <a href="https://libctru.devkitpro.org/index.html">user-mode library for writing useful homebrew on the 3DS</a>. Now what's that function do...?</p>
+<blockquote>
+<p>Initiates a display transfer.</p>
+</blockquote>
+<p>Well, that's not very helpful, but this is a &quot;key intersection&quot;, so it's probably really important to understand this function.</p>
+<p>By finding an <a href="https://github.com/SVatG/SkateStation/blob/master/EffectCoolCube2.c#L176">example</a> online (I'm linking to one I found randomly), and <a href="https://www.3dbrew.org/wiki/GPU/External_Registers#Transfer_Engine">searching 3dbrew</a>, a knowledge base of 3DS reverse engineering, then reading between the lines, one can determine that this is a DMA copy function.</p>
+<h2 id="dma-on-the-3ds"><a class="zola-anchor" href="#dma-on-the-3ds" aria-label="Anchor link for: dma-on-the-3ds">DMA on the 3DS</a></h2>
+<p>Those familiar with computer architecture will know that a DMA engine is, in brief terms, an auxilliary device that can transfer large amounts of data without the CPUs involvement, freeing it up to perform more useful work. On the 3DS, the DMA engine is treated as part of the GPU, and is commonly used to upload textures to VRAM quickly. </p>
+<p>With that in mind, we can revisit the documentation and example, and this &quot;key intersection&quot; makes a little more sense. The code leading up to this block opens romfs:/file.bin, which we can safely assume is the same file.bin we were provided. We can see that a value is read out of the file object, passed into another function, then that value is passed into another function twice. The results of those functions are then the input and output addresses of the DMA transfer, implying that everything just mentioned was memory allocation. Let's make some changes to the decompiled function with that in mind...</p>
+<p><ul class="nav nav-tabs" id="reverse_start" role="tablist">
+    
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active " id="a1-tab" data-bs-toggle="tab" data-bs-target="#a1" type="button" role="tab" aria-controls="home" aria-selected="true">a1</button>
+    </li>
+    
+    <li class="nav-item" role="presentation">
+      <button class="nav-link " id="a2-tab" data-bs-toggle="tab" data-bs-target="#a2" type="button" role="tab" aria-controls="home" aria-selected="true">a2</button>
+    </li>
+    
+    <li class="nav-item" role="presentation">
+      <button class="nav-link " id="a3-tab" data-bs-toggle="tab" data-bs-target="#a3" type="button" role="tab" aria-controls="home" aria-selected="true">a3</button>
+    </li>
+    
+    <li class="nav-item" role="presentation">
+      <button class="nav-link " id="a4-tab" data-bs-toggle="tab" data-bs-target="#a4" type="button" role="tab" aria-controls="home" aria-selected="true">a4</button>
+    </li>
+    
+</ul>
+<div class="tab-content">
+    
+    
+    <div class="tab-pane active " id="a1" role="tabpanel" aria-labelledby="a1-tab">
+        <pre data-lang="c" style="background-color:#2b303b;color:#c0c5ce;" class="language-c "><code class="language-c" data-lang="c"><span>    uStack_14 = </span><span style="color:#bf616a;">FUN_0010d4ec</span><span>(&quot;</span><span style="color:#a3be8c;">romfs:/file.bin</span><span>&quot;,&amp;DAT_00125008);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010dc10</span><span>(uStack_14,</span><span style="color:#d08770;">0</span><span>,</span><span style="color:#d08770;">2</span><span>);
+</span><span>    iStack_18 = </span><span style="color:#bf616a;">FUN_0010e1d4</span><span>(uStack_14);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010dc10</span><span>(uStack_14,</span><span style="color:#d08770;">0</span><span>,</span><span style="color:#d08770;">0</span><span>);
+</span><span>    uVar3 = </span><span style="color:#bf616a;">FUN_00101610</span><span>(iStack_18);
+</span><span>    uStack_1c = </span><span style="color:#bf616a;">FUN_00101aac</span><span>(uVar3);
+</span><span>    uVar3 = </span><span style="color:#bf616a;">FUN_00101610</span><span>(iStack_18);
+</span><span>    uStack_20 = </span><span style="color:#bf616a;">FUN_00101aac</span><span>(uVar3);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010d7dc</span><span>(uStack_1c,iStack_18,</span><span style="color:#d08770;">1</span><span>,uStack_14);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010cd88</span><span>(uStack_14);
+</span><span>    uVar3 = </span><span style="color:#bf616a;">FUN_00101610</span><span>(iStack_18);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010612c</span><span>(uStack_1c,uVar3);
+</span><span>    uStack_24 = </span><span style="color:#bf616a;">FUN_00104dac</span><span>(uStack_1c,FUN_00100020,uStack_20,FUN_00100020,</span><span style="color:#d08770;">2</span><span>);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010f40c</span><span>(&quot;</span><span style="color:#a3be8c;">GX_DisplayTransfer returned </span><span style="color:#d08770;">%d</span><span style="color:#96b5b4;">\n</span><span>&quot;,uStack_24);
+</span></code></pre>
+
+    </div>
+    
+    
+    <div class="tab-pane " id="a2" role="tabpanel" aria-labelledby="a2-tab">
+        <pre data-lang="c" style="background-color:#2b303b;color:#c0c5ce;" class="language-c "><code class="language-c" data-lang="c"><span>    fp = </span><span style="color:#96b5b4;">fopen</span><span>(&quot;</span><span style="color:#a3be8c;">romfs:/file.bin</span><span>&quot;,&amp;DAT_00125008);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010dc10</span><span>(fp,</span><span style="color:#d08770;">0</span><span>,</span><span style="color:#d08770;">2</span><span>);
+</span><span>    local_18 = </span><span style="color:#bf616a;">FUN_0010e1d4</span><span>(fp);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010dc10</span><span>(fp,</span><span style="color:#d08770;">0</span><span>,</span><span style="color:#d08770;">0</span><span>);
+</span><span>    uVar3 = </span><span style="color:#bf616a;">FUN_00101610</span><span>(local_18);
+</span><span>    local_1c = </span><span style="color:#bf616a;">FUN_00101aac</span><span>(uVar3);
+</span><span>    uVar3 = </span><span style="color:#bf616a;">FUN_00101610</span><span>(local_18);
+</span><span>    local_20 = </span><span style="color:#bf616a;">FUN_00101aac</span><span>(uVar3);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010d7dc</span><span>(local_1c,local_18,</span><span style="color:#d08770;">1</span><span>,fp);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010cd88</span><span>(fp);
+</span><span>    uVar3 = </span><span style="color:#bf616a;">FUN_00101610</span><span>(local_18);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010612c</span><span>(local_1c,uVar3);
+</span><span>    local_24 = </span><span style="color:#bf616a;">FUN_00104dac</span><span>(local_1c,FUN_00100020,local_20,FUN_00100020,</span><span style="color:#d08770;">2</span><span>);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010f40c</span><span>(&quot;</span><span style="color:#a3be8c;">GX_DisplayTransfer returned </span><span style="color:#d08770;">%d</span><span style="color:#96b5b4;">\n</span><span>&quot;,local_24);
+</span></code></pre>
+
+    </div>
+    
+    
+    <div class="tab-pane " id="a3" role="tabpanel" aria-labelledby="a3-tab">
+        <pre data-lang="c" style="background-color:#2b303b;color:#c0c5ce;" class="language-c "><code class="language-c" data-lang="c"><span>    fp = </span><span style="color:#96b5b4;">fopen</span><span>(&quot;</span><span style="color:#a3be8c;">romfs:/file.bin</span><span>&quot;,&amp;DAT_00125008);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010dc10</span><span>(fp,</span><span style="color:#d08770;">0</span><span>,</span><span style="color:#d08770;">2</span><span>);
+</span><span>    local_18 = </span><span style="color:#bf616a;">FUN_0010e1d4</span><span>(fp);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010dc10</span><span>(fp,</span><span style="color:#d08770;">0</span><span>,</span><span style="color:#d08770;">0</span><span>);
+</span><span>    size_of_alloc = </span><span style="color:#bf616a;">some_size_fxn</span><span>(local_18);
+</span><span>    local_1c = </span><span style="color:#bf616a;">some_alloc_fxn</span><span>(size_of_alloc);
+</span><span>    size_of_alloc = </span><span style="color:#bf616a;">some_size_fxn</span><span>(local_18);
+</span><span>    local_20 = </span><span style="color:#bf616a;">some_alloc_fxn</span><span>(size_of_alloc);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010d7dc</span><span>(local_1c,local_18,</span><span style="color:#d08770;">1</span><span>,fp);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010cd88</span><span>(fp);
+</span><span>    size_of_alloc = </span><span style="color:#bf616a;">some_size_fxn</span><span>(local_18);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010612c</span><span>(local_1c,size_of_alloc);
+</span><span>    local_24 = </span><span style="color:#bf616a;">FUN_00104dac</span><span>(local_1c,FUN_00100020,local_20,FUN_00100020,</span><span style="color:#d08770;">2</span><span>);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010f40c</span><span>(&quot;</span><span style="color:#a3be8c;">GX_DisplayTransfer returned </span><span style="color:#d08770;">%d</span><span style="color:#96b5b4;">\n</span><span>&quot;,local_24);
+</span></code></pre>
+
+    </div>
+    
+    
+    <div class="tab-pane " id="a4" role="tabpanel" aria-labelledby="a4-tab">
+        <pre data-lang="c" style="background-color:#2b303b;color:#c0c5ce;" class="language-c "><code class="language-c" data-lang="c"><span>    fp = </span><span style="color:#96b5b4;">fopen</span><span>(&quot;</span><span style="color:#a3be8c;">romfs:/file.bin</span><span>&quot;,&amp;DAT_00125008);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010dc10</span><span>(fp,</span><span style="color:#d08770;">0</span><span>,</span><span style="color:#d08770;">2</span><span>);
+</span><span>    local_18 = </span><span style="color:#bf616a;">FUN_0010e1d4</span><span>(fp);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010dc10</span><span>(fp,</span><span style="color:#d08770;">0</span><span>,</span><span style="color:#d08770;">0</span><span>);
+</span><span>    size_of_alloc = </span><span style="color:#bf616a;">some_size_fxn</span><span>(local_18);
+</span><span>    input_buf = </span><span style="color:#bf616a;">some_alloc_fxn</span><span>(size_of_alloc);
+</span><span>    size_of_alloc = </span><span style="color:#bf616a;">some_size_fxn</span><span>(local_18);
+</span><span>    output_buf = </span><span style="color:#bf616a;">some_alloc_fxn</span><span>(size_of_alloc);
+</span><span>    </span><span style="color:#bf616a;">fread</span><span>(input_buf,local_18,</span><span style="color:#d08770;">1</span><span>,fp);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010cd88</span><span>(fp);
+</span><span>    size_of_alloc = </span><span style="color:#bf616a;">some_size_fxn</span><span>(local_18);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010612c</span><span>(input_buf,size_of_alloc);
+</span><span>    dt_result = </span><span style="color:#bf616a;">GX_DisplayTransfer</span><span>(input_buf,FUN_00100020,output_buf,FUN_00100020,</span><span style="color:#d08770;">2</span><span>);
+</span><span>    </span><span style="color:#bf616a;">printf</span><span>(&quot;</span><span style="color:#a3be8c;">GX_DisplayTransfer returned </span><span style="color:#d08770;">%d</span><span style="color:#96b5b4;">\n</span><span>&quot;,dt_result);
+</span></code></pre>
+
+    </div>
+    
+</div>
+One noteworthy aspect of this, at least here, is that Ghidra mistakenly types the &quot;dimension&quot; flag of the display transfer as a function pointer. It's necessary to correct this issue; once it does, we can see that the dimension is composed of two 16-bit integers packed together as is seen in the documentation and example with the macro <code>GX_BUFFER_DIM</code>. We need not worry too much about this, it's effectively a glorified size parameter with a display transfer. (As an aside, this parameter gets <em>much</em> more interesting with the GX_TextureCopy counterpart.) We also see a <code>flags</code> value of 2, which probably isn't important, right?</p>
+<pre data-lang="c" style="background-color:#2b303b;color:#c0c5ce;" class="language-c "><code class="language-c" data-lang="c"><span>    fp = </span><span style="color:#96b5b4;">fopen</span><span>(&quot;</span><span style="color:#a3be8c;">romfs:/file.bin</span><span>&quot;,&amp;DAT_00125008);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010dc10</span><span>(fp,</span><span style="color:#d08770;">0</span><span>,</span><span style="color:#d08770;">2</span><span>);
+</span><span>    local_18 = </span><span style="color:#bf616a;">FUN_0010e1d4</span><span>(fp);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010dc10</span><span>(fp,</span><span style="color:#d08770;">0</span><span>,</span><span style="color:#d08770;">0</span><span>);
+</span><span>    size_of_alloc = </span><span style="color:#bf616a;">some_size_fxn</span><span>(local_18);
+</span><span>    input_buf = </span><span style="color:#bf616a;">some_alloc_fxn</span><span>(size_of_alloc);
+</span><span>    size_of_alloc = </span><span style="color:#bf616a;">some_size_fxn</span><span>(local_18);
+</span><span>    output_buf = </span><span style="color:#bf616a;">some_alloc_fxn</span><span>(size_of_alloc);
+</span><span>    </span><span style="color:#bf616a;">fread</span><span>(input_buf,local_18,</span><span style="color:#d08770;">1</span><span>,fp);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010cd88</span><span>(fp);
+</span><span>    size_of_alloc = </span><span style="color:#bf616a;">some_size_fxn</span><span>(local_18);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010612c</span><span>(input_buf,size_of_alloc);
+</span><span>    dt_result = </span><span style="color:#bf616a;">GX_DisplayTransfer</span><span>(input_buf,</span><span style="color:#d08770;">0x100020</span><span>,output_buf,</span><span style="color:#d08770;">0x100020</span><span>,</span><span style="color:#d08770;">2</span><span>);
+</span><span>    </span><span style="color:#bf616a;">printf</span><span>(&quot;</span><span style="color:#a3be8c;">GX_DisplayTransfer returned </span><span style="color:#d08770;">%d</span><span style="color:#96b5b4;">\n</span><span>&quot;,dt_result);
+</span></code></pre>
+<h2 id="executable-mapping"><a class="zola-anchor" href="#executable-mapping" aria-label="Anchor link for: executable-mapping">Executable mapping?</a></h2>
+<p>The other &quot;key intersection&quot; referred to in the logs is a bit further down:</p>
+<blockquote>
+<p>Executable mirroring of read-write page returned page %p\n</p>
+</blockquote>
+<p>I intended for this segment of the code to be <em>completely ignored</em>, because it's a lot of function calls towards something that's meant to be largely overlooked. However, I believe that this was not made clear enough.</p>
+<p>Here's what that block looks like in the source code:</p>
+<pre data-lang="c" style="background-color:#2b303b;color:#c0c5ce;" class="language-c "><code class="language-c" data-lang="c"><span>	</span><span style="color:#bf616a;">ctrdl_initCodeAllocator</span><span>();
+</span><span>	</span><span style="color:#b48ead;">char</span><span>* codeAlloc = </span><span style="color:#bf616a;">ctrdl_allocateAligned</span><span>(</span><span style="color:#bf616a;">nextPow2</span><span>(fsize));
+</span><span>	</span><span style="color:#bf616a;">memcpy</span><span>(codeAlloc, display_transfer_result, </span><span style="color:#bf616a;">nextPow2</span><span>(fsize));
+</span><span>
+</span><span>	</span><span style="color:#b48ead;">void</span><span>* executable_addr = </span><span style="color:#bf616a;">ctrdl_allocateCode</span><span>(codeAlloc, fsize);
+</span><span>
+</span><span>	</span><span style="color:#bf616a;">ctrdl_changePermission</span><span>(
+</span><span>            CUR_PROCESS_HANDLE, executable_addr,
+</span><span>            </span><span style="color:#bf616a;">ctrdl_alignSize</span><span>(fsize),
+</span><span>            MEMPERM_READEXECUTE);
+</span><span>	</span><span style="color:#bf616a;">printf</span><span>(&quot;</span><span style="color:#a3be8c;">Executable mirroring of read-write page returned page </span><span style="color:#d08770;">%p</span><span style="color:#96b5b4;">\n</span><span>&quot;, executable_addr);
+</span></code></pre>
+<p>It's now time to explain what this does. The 3DS, like all contemporary operating systems, employs W^X (write or execute, but never both) memory protection, meaning that you can't execute a page that you've written to and vice versa. One can get around this using <a href="https://github.com/LumaTeam/Luma3DS">Luma3DS</a>, which relaxes enforcement of this policy; you can then have an allocated block of memory mapped as RW and a mirror of that memory mapped as RX. Ultimately, though, those technical details are unnecessary to understand what's important- this segment takes the result of the DMA operation and allows it to be executed.</p>
+<table><thead><tr><th style="text-align: center"><img src="https://reswitched-weekly-reboot.github.io/posts/3ds-ctf/lima3ds.png" alt="Image of a modified Nintendo 3DS logo which adds the word &quot;Lima&quot; and an image of a lima bean." /></th></tr></thead><tbody>
+<tr><td style="text-align: center"><em>It's Luma3DS, not Lima3DS.</em></td></tr>
+</tbody></table>
+<p>It's important to remember while reading the rest of this article that <em>code is data</em>. For example, each single ARM instruction (add, subtract, multiply, compare, branch...) is a series of four bytes, decoded and executed by the processor. As <a href="https://en.wikipedia.org/wiki/Code_as_data">Wikipedia</a> puts it:</p>
+<blockquote>
+<p>Code-as-data is also a principle of the Von Neumann architecture, since stored programs and data are both represented as bits in the same memory device. This architecture offers the ability to write self-modifying code. It also opens the security risk of disguising a malicious program as user data and then using an exploit to direct execution to the malicious program.</p>
+</blockquote>
+<h2 id="the-main-loop"><a class="zola-anchor" href="#the-main-loop" aria-label="Anchor link for: the-main-loop">The Main Loop</a></h2>
+<p>The main loop of the program is another subtle mistake, meant to be trivial to understand but in reality frustrating. </p>
+<pre data-lang="c" style="background-color:#2b303b;color:#c0c5ce;" class="language-c "><code class="language-c" data-lang="c"><span>    </span><span style="color:#b48ead;">do </span><span>{
+</span><span>      iVar2 = </span><span style="color:#bf616a;">FUN_001078e0</span><span>();
+</span><span>      </span><span style="color:#b48ead;">if </span><span>(iVar2 == </span><span style="color:#d08770;">0</span><span>) </span><span style="color:#b48ead;">goto</span><span> LAB_00101914;
+</span><span>      </span><span style="color:#bf616a;">FUN_00105e5c</span><span>(</span><span style="color:#d08770;">2</span><span>,</span><span style="color:#d08770;">1</span><span>);
+</span><span>      </span><span style="color:#bf616a;">FUN_00104d08</span><span>();
+</span><span>      </span><span style="color:#bf616a;">FUN_00107e68</span><span>();
+</span><span>      local_30 = </span><span style="color:#bf616a;">FUN_0010810c</span><span>();
+</span><span>      param_3 = local_5c;
+</span><span>      local_c = (*local_2c)(local_30,local_c);
+</span><span>    } </span><span style="color:#b48ead;">while </span><span>(local_5c[</span><span style="color:#d08770;">0</span><span>] == </span><span style="color:#d08770;">0</span><span>);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010f520</span><span>(&quot;</span><span style="color:#a3be8c;">Congratulations! Your flag is:</span><span>&quot;);
+</span><span>    </span><span style="color:#bf616a;">printf</span><span>(local_5c);
+</span></code></pre>
+<p>One thing we are able to see is that somehow, if the loop exits correctly, <code>local_5c</code> must contain the output flag. But what's all the rest?</p>
+<p>If you can figure out that <code>FUN_0010810c</code> is <code>hidKeysDown()</code>, the 3DS function which gets the buttons that were just pressed, this would have instantly become clear as day. However, ascertaining this is not a trivial task, which I'll discuss in more detail shortly. The main loop passes through the buttons pressed this frame, and somehow expects the executable code to spit out the flag if a certain button combination was pressed. Ghidra is actually mis-decompiling this code pointer call; the program does pass <code>flag_buffer</code> as a parameter, so I had to override the function signature to produce the correct output.</p>
+<ul class="nav nav-tabs" id="reverse_main_loop" role="tablist">
+    
+    <li class="nav-item" role="presentation">
+      <button class="nav-link active " id="a1-tab" data-bs-toggle="tab" data-bs-target="#a1" type="button" role="tab" aria-controls="home" aria-selected="true">a1</button>
+    </li>
+    
+    <li class="nav-item" role="presentation">
+      <button class="nav-link " id="a2-tab" data-bs-toggle="tab" data-bs-target="#a2" type="button" role="tab" aria-controls="home" aria-selected="true">a2</button>
+    </li>
+    
+</ul>
+<div class="tab-content">
+    
+    
+    <div class="tab-pane active " id="a1" role="tabpanel" aria-labelledby="a1-tab">
+        <pre data-lang="c" style="background-color:#2b303b;color:#c0c5ce;" class="language-c "><code class="language-c" data-lang="c"><span>    </span><span style="color:#b48ead;">do </span><span>{
+</span><span>      iVar2 = </span><span style="color:#bf616a;">FUN_001078e0</span><span>();
+</span><span>      </span><span style="color:#b48ead;">if </span><span>(iVar2 == </span><span style="color:#d08770;">0</span><span>) </span><span style="color:#b48ead;">goto</span><span> LAB_00101914;
+</span><span>      </span><span style="color:#bf616a;">FUN_00105e5c</span><span>(</span><span style="color:#d08770;">2</span><span>,</span><span style="color:#d08770;">1</span><span>);
+</span><span>      </span><span style="color:#bf616a;">FUN_00104d08</span><span>();
+</span><span>      </span><span style="color:#bf616a;">FUN_00107e68</span><span>();
+</span><span>      uVar8 = </span><span style="color:#bf616a;">hidKeysDown</span><span>();
+</span><span>      some_input_and_output = (*code_pointer)(uVar8,some_input_and_output);
+</span><span>    } </span><span style="color:#b48ead;">while </span><span>(flag_buffer[</span><span style="color:#d08770;">0</span><span>] == </span><span style="color:#d08770;">0</span><span>);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010f520</span><span>(&quot;</span><span style="color:#a3be8c;">Congratulations! Your flag is:</span><span>&quot;);
+</span><span>    </span><span style="color:#bf616a;">printf</span><span>(flag_buffer);
+</span></code></pre>
+
+    </div>
+    
+    
+    <div class="tab-pane " id="a2" role="tabpanel" aria-labelledby="a2-tab">
+        <pre data-lang="c" style="background-color:#2b303b;color:#c0c5ce;" class="language-c "><code class="language-c" data-lang="c"><span>    </span><span style="color:#b48ead;">do </span><span>{
+</span><span>      iVar2 = </span><span style="color:#bf616a;">FUN_001078e0</span><span>();
+</span><span>      </span><span style="color:#b48ead;">if </span><span>(iVar2 == </span><span style="color:#d08770;">0</span><span>) </span><span style="color:#b48ead;">goto</span><span> LAB_00101914;
+</span><span>      </span><span style="color:#bf616a;">FUN_00105e5c</span><span>(</span><span style="color:#d08770;">2</span><span>,</span><span style="color:#d08770;">1</span><span>);
+</span><span>      </span><span style="color:#bf616a;">FUN_00104d08</span><span>();
+</span><span>      </span><span style="color:#bf616a;">FUN_00107e68</span><span>();
+</span><span>      uVar8 = </span><span style="color:#bf616a;">hidKeysDown</span><span>();
+</span><span>      some_input_and_output = (*code_pointer)(uVar8,some_input_and_output,flag_buffer);
+</span><span>    } </span><span style="color:#b48ead;">while </span><span>(flag_buffer[</span><span style="color:#d08770;">0</span><span>] == </span><span style="color:#d08770;">0</span><span>);
+</span><span>    </span><span style="color:#bf616a;">FUN_0010f520</span><span>(&quot;</span><span style="color:#a3be8c;">Congratulations! Your flag is:</span><span>&quot;);
+</span><span>    </span><span style="color:#bf616a;">printf</span><span>(flag_buffer);
+</span></code></pre>
+
+    </div>
+    
+</div>
+<p>Let's review what we've learned so far:</p>
+<ul>
+<li>The program opened <code>file.bin</code> and loaded it into memory.</li>
+<li>It copied it with <code>GX_DisplayTransfer</code> via the DMA hardware.</li>
+<li>It mapped it as executable.</li>
+<li>It then executed the file and expected it to spit the flag out after pressing some sort of button combination.</li>
+</ul>
+<p><em>So our flag is inside executable code in <code>file.bin</code>!</em> Let's disassemble that file...</p>
+<div  style="overflow-y: scroll; max-height: 500px;"><pre data-lang="asm" style="background-color:#2b303b;color:#c0c5ce;" class="language-asm "><code class="language-asm" data-lang="asm"><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">fp</span><span>, [</span><span style="color:#bf616a;">sp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">4</span><span>]</span><span style="color:#8fa1b3;">!
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#bf616a;">sp</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r1</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r2</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x18</span><span>]
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x450
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0x3c
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">2
+</span><span style="color:#8fa1b3;">bic r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x80000000
+</span><span style="color:#8fa1b3;">bic r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x80
+</span><span style="color:#b48ead;">and </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r2
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">1
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0x54
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x2b8
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">6
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">pc</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x244</span><span>]
+</span><span style="color:#b48ead;">and </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r2
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0x84
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0x7c
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">mov </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">9
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0xa0
+</span><span style="color:#b48ead;">sub </span><span style="color:#bf616a;">sp</span><span>, </span><span style="color:#bf616a;">sp</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x1c
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r0</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">bic r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x40000000
+</span><span style="color:#8fa1b3;">bic r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x40
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0xc4
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0xbc
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0xc4
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x3e0
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">1
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">5
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0xf0
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0xf8
+</span><span style="color:#8fa1b3;">ldr r2</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0xf0
+</span><span style="color:#b48ead;">and </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">2
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">1
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x228
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#b48ead;">and </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">1
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0x128
+</span><span style="color:#8fa1b3;">ldr r2</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0x120
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0x124
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x528
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">mov </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">3
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0x154
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">3
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0x158
+</span><span style="color:#8fa1b3;">bic r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x80
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#8fa1b3;">bic r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x10000000
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0x158
+</span><span style="color:#b48ead;">mov </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">1
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">6
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x2c0
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#8fa1b3;">bic r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">2
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0x188
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x288
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">pc</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x464</span><span>]
+</span><span style="color:#b48ead;">and </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r2
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">1
+</span><span style="color:#b48ead;">mov </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">1
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0x1c4
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x4f8
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">ldr r2</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">pc</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x354</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#8fa1b3;">bic r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x80000000
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0x1c8
+</span><span style="color:#b48ead;">mov </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">bic r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x10
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x410
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x3e8
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0x1fc
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">8
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0x204
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0x1fc
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">1
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">9
+</span><span style="color:#8fa1b3;">ldr r2</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">pc</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x408</span><span>]
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0x21c
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0x220
+</span><span style="color:#b48ead;">mov </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">2
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x520
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0x250
+</span><span style="color:#8fa1b3;">ldr r2</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0x254
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0x24c
+</span><span style="color:#8fa1b3;">bic r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x20000000
+</span><span style="color:#8fa1b3;">bic r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x20
+</span><span style="color:#b48ead;">mov </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">1
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">7
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0x280
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0x27c
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#b48ead;">mov </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x18</span><span>]
+</span><span style="color:#8fa1b3;">ldr r2</span><span>, [</span><span style="color:#8fa1b3;">pc</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0xd8</span><span>]
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">4
+</span><span style="color:#8fa1b3;">ldr r2</span><span>, [</span><span style="color:#8fa1b3;">pc</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0xcc</span><span>]
+</span><span style="color:#b48ead;">and </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r2
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">1
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x648
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0x2c0
+</span><span style="color:#8fa1b3;">ldr r2</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">4
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">pc</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x2fc</span><span>]
+</span><span style="color:#b48ead;">and </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r2
+</span><span style="color:#8fa1b3;">bic r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x20000000
+</span><span style="color:#8fa1b3;">bic r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x20
+</span><span style="color:#b48ead;">mov </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0x2d4
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x4b0
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x488
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#8fa1b3;">bic r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x10000000
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">1
+</span><span style="color:#8fa1b3;">bls #</span><span style="color:#d08770;">0x2f4
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x3d0
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r2</span><span>, [</span><span style="color:#8fa1b3;">r3</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x18</span><span>]
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r2</span><span>, [</span><span style="color:#8fa1b3;">r3</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x18</span><span>]
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x6e0
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#8fa1b3;">bic r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x40000000
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">pc</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x3b0</span><span>]
+</span><span style="color:#b48ead;">and </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r2
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">1
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0x338
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x5f8
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x5d0
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">ldr r2</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">pc</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x2a4</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">7
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0x36c
+</span><span style="color:#b48ead;">and </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r2
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">bic r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x10
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x4e8
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0xa
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0x440
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0x438
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">8
+</span><span style="color:#8fa1b3;">ldr r2</span><span>, [</span><span style="color:#8fa1b3;">pc</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0xc0</span><span>]
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0xc
+</span><span style="color:#8fa1b3;">ldr r2</span><span>, [</span><span style="color:#8fa1b3;">pc</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0xb4</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">1
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0x3a8
+</span><span style="color:#8fa1b3;">bic r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x40
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0x3a8
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x720
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">1
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">4
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">5
+</span><span style="color:#8fa1b3;">bne #</span><span style="color:#d08770;">0x3dc
+</span><span style="color:#b48ead;">and </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r2
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">ldr r2</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">pc</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x1ec</span><span>]
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0x3dc
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#8fa1b3;">beq #</span><span style="color:#d08770;">0x3e0
+</span><span style="color:#b48ead;">mov </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">8
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x10</span><span>]
+</span><span style="color:#b48ead;">and </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">8
+</span><span style="color:#b48ead;">mov </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r2</span><span>, [</span><span style="color:#8fa1b3;">r3</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x18</span><span>]
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r2</span><span>, [</span><span style="color:#8fa1b3;">r3</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x18</span><span>]
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x10
+</span><span style="color:#8fa1b3;">ldr r2</span><span>, [</span><span style="color:#8fa1b3;">pc</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0xa8</span><span>]
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x14
+</span><span style="color:#8fa1b3;">ldr r2</span><span>, [</span><span style="color:#8fa1b3;">pc</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x9c</span><span>]
+</span><span style="color:#8fa1b3;">ldr r2</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x18</span><span>]
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r2</span><span>, </span><span style="color:#8fa1b3;">r3
+</span><span style="color:#b48ead;">lsl </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">2
+</span><span style="color:#8fa1b3;">ldr r2</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x18</span><span>]
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r2</span><span>, [</span><span style="color:#8fa1b3;">r3</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x18</span><span>]
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r2</span><span>, [</span><span style="color:#8fa1b3;">r3</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x18</span><span>]
+</span><span style="color:#8fa1b3;">ldr r1</span><span>, [</span><span style="color:#8fa1b3;">r3</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">8</span><span>]
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">r2</span><span>, </span><span style="color:#8fa1b3;">r2</span><span>, </span><span style="color:#8fa1b3;">r3
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">pc</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x5c</span><span>]
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x18
+</span><span style="color:#8fa1b3;">ldr r2</span><span>, [</span><span style="color:#8fa1b3;">pc</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0x90</span><span>]
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">8</span><span>]
+</span><span style="color:#8fa1b3;">b #</span><span style="color:#d08770;">0x54c
+</span><span style="color:#8fa1b3;">eor r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r1
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">r2</span><span>]
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">8</span><span>]
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">8</span><span>]
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#b48ead;">str </span><span style="color:#8fa1b3;">r2</span><span>, [</span><span style="color:#8fa1b3;">r3</span><span>]
+</span><span style="color:#b48ead;">mov </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">8</span><span>]
+</span><span style="color:#b48ead;">lsl </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">2
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">8</span><span>]
+</span><span style="color:#b48ead;">add </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">1
+</span><span style="color:#b48ead;">cmp </span><span style="color:#8fa1b3;">r3</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">6
+</span><span style="color:#8fa1b3;">ble #</span><span style="color:#d08770;">0x558
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">ldr r3</span><span>, [</span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x14</span><span>]
+</span><span style="color:#b48ead;">mov </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r3
+</span><span style="color:#bf616a;">bx </span><span style="color:#8fa1b3;">lr
+</span><span style="color:#8fa1b3;">andmi r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">asr #</span><span style="color:#d08770;">32
+</span><span style="color:#8fa1b3;">svcpl #</span><span style="color:#d08770;">0x3759df
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#b48ead;">add </span><span style="color:#bf616a;">sp</span><span>, </span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0
+</span><span style="color:#b48ead;">pop </span><span style="color:#8fa1b3;">{fp}
+</span><span style="color:#8fa1b3;">andhi r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#b48ead;">lsl </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">1
+</span><span style="color:#8fa1b3;">andhs r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">lsr #</span><span style="color:#d08770;">32
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andne r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#b48ead;">lsl </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">ldrblo r3</span><span>, [</span><span style="color:#8fa1b3;">r4</span><span>], </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0x8b7
+</span><span style="color:#8fa1b3;">ldmdalo sb</span><span>, </span><span style="color:#8fa1b3;">{r0</span><span>, </span><span style="color:#8fa1b3;">r1</span><span>, </span><span style="color:#8fa1b3;">r4</span><span>, </span><span style="color:#8fa1b3;">r5</span><span>, </span><span style="color:#8fa1b3;">r7</span><span>, </span><span style="color:#8fa1b3;">fp</span><span>, </span><span style="color:#bf616a;">sp</span><span>, </span><span style="color:#8fa1b3;">lr} ^
+</span><span style="color:#8fa1b3;">subeq r6</span><span>, </span><span style="color:#8fa1b3;">r4</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#b48ead;">lsl </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">17
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">mcrreq p1</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">0xb</span><span>, </span><span style="color:#8fa1b3;">r2</span><span>, </span><span style="color:#bf616a;">ip</span><span>, </span><span style="color:#8fa1b3;">c6
+</span><span style="color:#8fa1b3;">strbhs r3</span><span>, [</span><span style="color:#bf616a;">sp</span><span>, </span><span style="color:#8fa1b3;">#</span><span>-</span><span style="color:#d08770;">0xa8</span><span>]</span><span style="color:#8fa1b3;">!
+</span><span style="color:#8fa1b3;">mrcvc p12</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">2</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">c9</span><span>, </span><span style="color:#8fa1b3;">c9</span><span>, </span><span style="color:#8fa1b3;">#</span><span style="color:#d08770;">5
+</span><span style="color:#8fa1b3;">svcpl #</span><span style="color:#d08770;">0x3753a2
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span><span style="color:#8fa1b3;">andeq r0</span><span>, </span><span style="color:#8fa1b3;">r0</span><span>, </span><span style="color:#8fa1b3;">r0
+</span></code></pre>
+
+</div>
+<p>Aw, nuts.</p>
+<p>It couldn't be that easy, right? After the accidentally substantial reverse engineering effort, we're confronted with a bizarre puzzle. Somewhere along the line, this apparently executable code was transformed from gibberish into properly functioning code that will spit out our flag.</p>
+<h2 id="intermission-an-accidental-odyssey"><a class="zola-anchor" href="#intermission-an-accidental-odyssey" aria-label="Anchor link for: intermission-an-accidental-odyssey">Intermission- An Accidental Odyssey</a></h2>
+<p>This challenge was designed to have almost all of the information above available to you from the beginning. You were intended to learn that the file was opened, read in, fed to <code>GX_DisplayTransfer</code> (you were still intended to learn the meaning of that function on your own) and finally mapped as executable and run. Instead, it took careful, painful reverse engineering, with a lot of insight and guesswork. What went wrong?</p>
+<p>The first major hurdle is that the meaning of <code>GX_DisplayTransfer</code>, which is not a mere search away. I spent quite a long time tinkering with 3DS homebrew, writing my own competent <a href="https://github.com/Swiftloke/ModMoon/tree/master/source/sdraw">2D renderer</a> using the custom graphics API exposed with <a href="https://github.com/devkitPro/citro3d">citro3d</a>, so of course <em>I</em> know what <code>GX_DisplayTransfer</code> does, but it takes a fair bit of reading to ascertain its meaning for yourself, and even then it might not be clear what the function is. I mentioned 3dbrew earlier; the average reverse engineer might not come across that treasure trove of information.</p>
+<p>The next problem was with the RW-&gt;RX remapping. As aforementioned, I intended for that segment to be entirely ignored by the reverse engineer, but the way the logs were actually written meant that the hint was almost certainly not clear enough. Another hint along the lines of <code>Beginning to map DisplayTransfer result as executable...</code> may have significantly improved the situation.</p>
+<p>Another major problem was failing to properly explain that the unknown function in the main loop was <code>hidKeysDown()</code>. My challenge design revolved around people knowing that this was the function in question. I completely failed to elaborate on this, and the challenge was made much less clear as a result.</p>
+<p>Finally, this challenge stripped <em>symbols</em> from the binary, the strings that identify the meanings of a function. While designing this challenge, I was running up against the deadline to the CTF and needed a way to prevent the challenge from simply being run on a real 3DS. After all, since the code is clearly valid by the time it's executed, one could simply attach a debugger to the running process and dump the code at that time.</p>
+<p>Without any better ideas, I provided a stripped .ELF file as the binary. Without symbols, the devkitARM toolchain can't build it into an executable image. One of the more saavy people who attempted this challenge made many attempts to get it to run without progress; I figure at that rate, anyone who did manage to execute it deserves their flag... But at what cost? Recall that this was meant to be a &quot;6/10&quot; challenge, <em>run as a side event during a hackathon</em>, with one neat twist to discover; instead, it required a mountain of reverse engineering to even get far enough to discover the twist. Only one person got far enough to even consider uncovering the secret, and only long after the CTF had ended when they continued grinding away at it.</p>
+<h2 id="this-one-weird-trick-will-scramble-your-data-at-the-hardware-level"><a class="zola-anchor" href="#this-one-weird-trick-will-scramble-your-data-at-the-hardware-level" aria-label="Anchor link for: this-one-weird-trick-will-scramble-your-data-at-the-hardware-level">This One Weird Trick Will Scramble Your Data At The Hardware Level!</a></h2>
+<p>With my lament about accidentally creating a CTF challenge raised from hell, let's come back to how that nonsense code gets transformed into being executable.</p>
+<p>Let's review the process of how the data flows:</p>
+<ul>
+<li>Opened and read using the standard library functions.</li>
+<li>Copied using the GPUs DMA function.</li>
+<li>Mapped as executable using a library that I didn't write.</li>
+</ul>
+<p>Where does that magical transformation happen?</p>
+<p>No, seriously, engage your brain. Use some reading comprehension.</p>
+<p>Perhaps the name of the challenge would help guide the way?</p>
+<p>...</p>
+<p>If you guessed &quot;It's the DMA function&quot;, congratulations! You've been paying attention. If you skipped straight to the answer, well, I get it.</p>
+<p>The PICA200 GPU in the 3DS employs swizzling in its texturing pipeline. This is fairly confusing terminology, as this phrase has multiple other uses in the realm of graphics (see vertex swizzling, i.e. <code>vertex.xyz = vertex.zxy</code>). In this context, swizzling means that texture memory is physically stored differently than would appear logical to the human eye. This is done for the purposes of spatial locality- if you re-arrange the data, you're able increase your cache hit rate and therefore make fewer (and costlier) trips to main memory.</p>
+<p><img src="https://reswitched-weekly-reboot.github.io/posts/3ds-ctf/Normal_Versus_Swizzled.png" alt="View of a normal texture versus its swizzled representation, showing how the image is garbled to the human eye" /></p>
+<p>So what does this have to do with a DMA transfer? Well, earlier it was stated that</p>
+<blockquote>
+<p>We also see a <code>flags</code> value of 2, which probably isn't important, right?</p>
+</blockquote>
+<p>Maybe it is important. Let's check that documentation a little more closely... We can see a <a href="https://libctru.devkitpro.org/gx_8h.html#a19b4c4ad91299256a7c285e9ba7673b9">list of transfer flags</a> here (which you'd be able to understand were transfer flags by looking at <a href="https://github.com/SVatG/SkateStation/blob/2818789c6d060a0144bb23af8de997d2ed9106b5/source/Tools.h#L54">the example</a>). That <code>GX_TRANSFER_OUT_TILED(x)</code> flag is in fact referring to the very same form of tiling! The DMA engine on the 3DS has some functionality that allows it to, during the copy process, re-arrange data that is laid out in the way one expects into the way the GPU expects it. This can be used to load textures at runtime; think ports of games in which ahead-of-time translation isn't possible, or very bad code which decodes and loads PNG files at runtime instead of AoT conversion. (The latter was the de-facto standard while writing 3DS homebrew for a few years before the <a href="https://github.com/devkitPro/tex3ds">tex3ds</a> project came out.) </p>
+<p><code>GX_TRANSFER_OUT_TILED(1)</code> is equal to <code>(1&lt;&lt;1)</code> which is equal to 2. So that means that this DMA transfer is applying that tiling flag, and the bytes are re-arranged to fit the tiled format. That's how this data winds up being real code instead of garbage!</p>
+<p>At this point, there are two solutions to the problem. You'll need to tile this data to get the normal code back out. You can either:</p>
+<ul>
+<li>Treat the tiling system as a black box, or</li>
+<li>Understand how the tiling function works</li>
+</ul>
+<p>I'll go over both solutions, as well as some trivia about how the tiling system works that made development a <em>lot</em> easier.</p>
+<h3 id="understand-how-the-tiling-function-works"><a class="zola-anchor" href="#understand-how-the-tiling-function-works" aria-label="Anchor link for: understand-how-the-tiling-function-works">Understand how the tiling function works</a></h3>
+<p>The PICA200 follows the common <a href="https://en.wikipedia.org/wiki/Z-order_curve">Morton Order</a> tiling curve, also known as Z-Curve. As aforementioned, the goal of tiling is to increase <em>spatial locality</em> of texture accesses by re-arranging blocks. Morton Order is not particularly intuitive to me, and in fact I had little knowledge of it before writing this article; understanding that the 3DS has swizzling hardware without comprehending its inner workings was enough to write the challenge. I'll leave the Wikipedia link for those who seek to learn the idea for themselves, as they do a better job explaining it than I could.</p>
+<h3 id="treat-the-tiling-system-as-a-black-box"><a class="zola-anchor" href="#treat-the-tiling-system-as-a-black-box" aria-label="Anchor link for: treat-the-tiling-system-as-a-black-box">Treat the tiling system as a black box</a></h3>
+<p>This approach effectively means that you'll rewrite the challenge yourself, compile it, and execute it, either on real 3DS hardware or on an emulator. Luckily, you don't need to actually execute the code, you just need to dump it; that'll save you some headache.</p>
+<p>Let's find another, more concise example of how display transfers work. I'm going to dig up an ancient piece of history which inspired this challenge in the first place- the aforementioned piece of code that would decode and tile PNG files at runtime. This was copied around the internet many, many times over the course of 2016 through 2018 (when <a href="https://citro2d.devkitpro.org/">citro2d</a> and tex3ds were released, superseding it). I too used this code, and <a href="https://github.com/Swiftloke/ModMoon/blob/bc32168ac060cca96ca45f075becce5118d1ba5f/source/sdraw.cpp#L92">we can see it in an early branch of my renderer project</a>. </p>
+<p><strong>If you are interested in writing homebrew, do not use this code! It's dead for a reason! We have citro2d and tex3ds which do the same thing but faster and easier! See <a href="https://github.com/devkitPro/3ds-examples/blob/master/graphics/gpu/gpusprites/source/main.c">the current examples</a> for a modern lesson!</strong></p>
+<p>As you can see, it's fairly straightforward; one needs to allocate enough memory using <code>linearAlloc</code> (a block of memory that's guaranteed to be readable by the GPU) first, then shove your data into it. Flush the cache so the GPU can read your data, then initiate the transfer and wait for the GPU to signal that it's done. (<code>C3D_SafeDisplayTransfer</code> is a citro3d function that allows usage of display transfers within a fully initialized C3D environment, such that the two don't trip over each other.) What's more important are the <code>TEXTURE_TRANSFER_FLAGS</code>:</p>
+<pre data-lang="c" style="background-color:#2b303b;color:#c0c5ce;" class="language-c "><code class="language-c" data-lang="c"><span style="color:#65737e;">// Used to convert textures to 3DS tiled format
+</span><span style="color:#65737e;">// Note: vertical flip flag set so 0,0 is top left of texture
+</span><span style="color:#b48ead;">#define </span><span>TEXTURE_TRANSFER_FLAGS \
+</span><span>	(</span><span style="color:#bf616a;">GX_TRANSFER_FLIP_VERT</span><span>(</span><span style="color:#d08770;">1</span><span>) | </span><span style="color:#bf616a;">GX_TRANSFER_OUT_TILED</span><span>(</span><span style="color:#d08770;">1</span><span>) | </span><span style="color:#bf616a;">GX_TRANSFER_RAW_COPY</span><span>(</span><span style="color:#d08770;">0</span><span>) | \
+</span><span>	</span><span style="color:#bf616a;">GX_TRANSFER_IN_FORMAT</span><span>(GX_TRANSFER_FMT_RGBA8) | </span><span style="color:#bf616a;">GX_TRANSFER_OUT_FORMAT</span><span>(GX_TRANSFER_FMT_RGBA8) | \
+</span><span>	</span><span style="color:#bf616a;">GX_TRANSFER_SCALING</span><span>(GX_TRANSFER_SCALE_NO))
+</span></code></pre>
+<p>In this code, the vertical flip flag is set to enable a texturing convention; obviously don't do this, but do use the tiling flag.</p>
+<p>With a little bit of elbow grease, and an installation of devkitARM as the challenge description recommends, you can use this tutorial to dump the original code.</p>
+<h3 id="aside-how-to-un-swizzle-data"><a class="zola-anchor" href="#aside-how-to-un-swizzle-data" aria-label="Anchor link for: aside-how-to-un-swizzle-data">Aside: How to un-swizzle data</a></h3>
+<p>Writing this challenge requiring that I convert the code using the inverse of the swizzling function first, since F(F'(x)) = x. I started out by attempting to use tex3ds' <a href="https://github.com/devkitPro/tex3ds/blob/master/source/swizzle.cpp#L28">inverse swizzler</a>, but I couldn't get it quite right. While bashing my head against the wall, I inadventently nerd-sniped <a href="https://github.com/LiquidFenrir">DeltaV</a> into performing a detailed, graphical series of tests on the GPU to see how flags affected the display transfer engine, and the results were quite interesting... </p>
+<p><img src="https://reswitched-weekly-reboot.github.io/posts/3ds-ctf/Display_Transfer_Experiments.png" alt="Results of the experiments. Many images are shown, showcasing the results of the Display Transfer and Texture Copy operations with each permutation of the RAW and TILED flags." /></p>
+<p>This image showcases the results of the outputs of each combination of flags with <code>GX_DisplayTransfer</code> and its close cousin <code>GX_TextureCopy</code> (which is another DMA function for slightly different purposes.) Input into each is a swizzled texture, now let's take a look right-to-left at the results...</p>
+<ul>
+<li>Raw and tiled: Spits out the output with texture copy, hardware freeze with display transfer. (You're supposed to use texture copy for non-transformative DMAs.) </li>
+<li>Not raw and tiled: Tiles the output. This makes a double-tile from the input.</li>
+<li>Raw and not tiled: Same results as raw and tiled.</li>
+<li>Not raw and not tiled: <strong>The original image is returned.</strong></li>
+</ul>
+<p>That's right, in addition to supporting tiling, the 3DS hardware supports <strong>inverse tiling</strong>! This is implemented to make final output to a framebuffer easy. Thus, scrambling the challenge code was as simple as changing a one to a zero and dumping the results to a file.</p>
+<h2 id="climbing-the-summit"><a class="zola-anchor" href="#climbing-the-summit" aria-label="Anchor link for: climbing-the-summit">Climbing the Summit</a></h2>
+<p>The reverse engineering nightmare overcome, the inscrutable DMA function understood and the obfuscated code un-scrambled, now at last the end is in sight...</p>
+<pre data-lang="c" style="background-color:#2b303b;color:#c0c5ce;" class="language-c "><code class="language-c" data-lang="c"><span style="color:#b48ead;">int </span><span style="color:#8fa1b3;">with_post_jump</span><span>(uint </span><span style="color:#bf616a;">param_1</span><span>,</span><span style="color:#b48ead;">int </span><span style="color:#bf616a;">param_2</span><span>,undefined4 *</span><span style="color:#bf616a;">param_3</span><span>)
+</span><span>
+</span><span>{
+</span><span>  </span><span style="color:#b48ead;">int</span><span> local_18;
+</span><span>  </span><span style="color:#b48ead;">int</span><span> local_c;
+</span><span>  
+</span><span>  </span><span style="color:#b48ead;">if </span><span>((param_2 == </span><span style="color:#d08770;">0</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">0x40000040</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">1</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((param_2 == </span><span style="color:#d08770;">0</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">0xbfffffbf</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((param_2 == </span><span style="color:#d08770;">1</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">0x40000040</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">2</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((param_2 == </span><span style="color:#d08770;">1</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">0xbfffffbf</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((param_2 == </span><span style="color:#d08770;">2</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">0x80000080</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">3</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((param_2 == </span><span style="color:#d08770;">2</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">0x7fffff7f</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((param_2 == </span><span style="color:#d08770;">3</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">0x80000080</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">4</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((param_2 == </span><span style="color:#d08770;">3</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">0x7fffff7f</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((param_2 == </span><span style="color:#d08770;">4</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">0x20000020</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">5</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((param_2 == </span><span style="color:#d08770;">4</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">0xdfffffdf</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((param_2 == </span><span style="color:#d08770;">5</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">0x10000010</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">6</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((param_2 == </span><span style="color:#d08770;">5</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">0xefffffef</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((param_2 == </span><span style="color:#d08770;">6</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">0x20000020</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">7</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((param_2 == </span><span style="color:#d08770;">6</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">0xdfffffdf</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((param_2 == </span><span style="color:#d08770;">7</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">0x10000010</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">8</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((param_2 == </span><span style="color:#d08770;">7</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">0xefffffef</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((param_2 == </span><span style="color:#d08770;">8</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">2</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">9</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((param_2 == </span><span style="color:#d08770;">8</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">0xfffffffd</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((param_2 == </span><span style="color:#d08770;">9</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">1</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">10</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((param_2 == </span><span style="color:#d08770;">9</span><span>) &amp;&amp; (</span><span style="color:#d08770;">1 </span><span>&lt; param_1)) {
+</span><span>    local_18 = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else </span><span>{
+</span><span>    local_18 = param_2;
+</span><span>    </span><span style="color:#b48ead;">if </span><span>((param_2 == </span><span style="color:#d08770;">10</span><span>) &amp;&amp; ((param_1 &amp; </span><span style="color:#d08770;">8</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>      local_18 = </span><span style="color:#d08770;">0</span><span>;
+</span><span>      *param_3 = </span><span style="color:#d08770;">0x345438b7</span><span>;
+</span><span>      param_3[</span><span style="color:#d08770;">1</span><span>] = </span><span style="color:#d08770;">0xc4c21b6</span><span>;
+</span><span>      param_3[</span><span style="color:#d08770;">2</span><span>] = </span><span style="color:#d08770;">0x256d30a8</span><span>;
+</span><span>      param_3[</span><span style="color:#d08770;">3</span><span>] = </span><span style="color:#d08770;">0x385968b3</span><span>;
+</span><span>      param_3[</span><span style="color:#d08770;">4</span><span>] = </span><span style="color:#d08770;">0x446880</span><span>;
+</span><span>      param_3[</span><span style="color:#d08770;">5</span><span>] = </span><span style="color:#d08770;">0x7e590cb9</span><span>;
+</span><span>      param_3[</span><span style="color:#d08770;">6</span><span>] = </span><span style="color:#d08770;">0x5f3753a2</span><span>;
+</span><span>      </span><span style="color:#b48ead;">for </span><span>(local_c = </span><span style="color:#d08770;">0</span><span>; local_c &lt; </span><span style="color:#d08770;">7</span><span>; local_c = local_c + </span><span style="color:#d08770;">1</span><span>) {
+</span><span>         param_3[local_c] = param_3[local_c] ^ </span><span style="color:#d08770;">0x5f3759df</span><span>;
+</span><span>      }
+</span><span>    }
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">return</span><span> local_18;
+</span><span>}
+</span></code></pre>
+<p>Well, this is really not that complicated... <code>param_2</code> is obviously a state which is stored by the calling function, we've already established that <code>param_1</code> is <code>hidKeysDown()</code> and <code>param_3</code> is the output flag. Let's update with that...</p>
+<pre data-lang="c" style="background-color:#2b303b;color:#c0c5ce;" class="language-c "><code class="language-c" data-lang="c"><span style="color:#b48ead;">int </span><span style="color:#8fa1b3;">with_post_jump</span><span>(uint </span><span style="color:#bf616a;">keysDown</span><span>,</span><span style="color:#b48ead;">int </span><span style="color:#bf616a;">state</span><span>,undefined4 *</span><span style="color:#bf616a;">out_flag</span><span>)
+</span><span>
+</span><span>{
+</span><span>  </span><span style="color:#b48ead;">int</span><span> output_state;
+</span><span>  </span><span style="color:#b48ead;">int</span><span> i;
+</span><span>  
+</span><span>  </span><span style="color:#b48ead;">if </span><span>((state == </span><span style="color:#d08770;">0</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">0x40000040</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    output_state = </span><span style="color:#d08770;">1</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((state == </span><span style="color:#d08770;">0</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">0xbfffffbf</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    output_state = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((state == </span><span style="color:#d08770;">1</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">0x40000040</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    output_state = </span><span style="color:#d08770;">2</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((state == </span><span style="color:#d08770;">1</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">0xbfffffbf</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    output_state = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((state == </span><span style="color:#d08770;">2</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">0x80000080</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    output_state = </span><span style="color:#d08770;">3</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((state == </span><span style="color:#d08770;">2</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">0x7fffff7f</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    output_state = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((state == </span><span style="color:#d08770;">3</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">0x80000080</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    output_state = </span><span style="color:#d08770;">4</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((state == </span><span style="color:#d08770;">3</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">0x7fffff7f</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    output_state = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((state == </span><span style="color:#d08770;">4</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">0x20000020</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    output_state = </span><span style="color:#d08770;">5</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((state == </span><span style="color:#d08770;">4</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">0xdfffffdf</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    output_state = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((state == </span><span style="color:#d08770;">5</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">0x10000010</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    output_state = </span><span style="color:#d08770;">6</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((state == </span><span style="color:#d08770;">5</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">0xefffffef</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    output_state = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((state == </span><span style="color:#d08770;">6</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">0x20000020</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    output_state = </span><span style="color:#d08770;">7</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((state == </span><span style="color:#d08770;">6</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">0xdfffffdf</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    output_state = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((state == </span><span style="color:#d08770;">7</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">0x10000010</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    output_state = </span><span style="color:#d08770;">8</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((state == </span><span style="color:#d08770;">7</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">0xefffffef</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    output_state = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((state == </span><span style="color:#d08770;">8</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">2</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    output_state = </span><span style="color:#d08770;">9</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((state == </span><span style="color:#d08770;">8</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">0xfffffffd</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    output_state = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((state == </span><span style="color:#d08770;">9</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">1</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>    output_state = </span><span style="color:#d08770;">10</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else if </span><span>((state == </span><span style="color:#d08770;">9</span><span>) &amp;&amp; (</span><span style="color:#d08770;">1 </span><span>&lt; keysDown)) {
+</span><span>    output_state = </span><span style="color:#d08770;">0</span><span>;
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">else </span><span>{
+</span><span>    output_state = state;
+</span><span>    </span><span style="color:#b48ead;">if </span><span>((state == </span><span style="color:#d08770;">10</span><span>) &amp;&amp; ((keysDown &amp; </span><span style="color:#d08770;">8</span><span>) != </span><span style="color:#d08770;">0</span><span>)) {
+</span><span>      output_state = </span><span style="color:#d08770;">0</span><span>;
+</span><span>      *out_flag = </span><span style="color:#d08770;">0x345438b7</span><span>;
+</span><span>      out_flag[</span><span style="color:#d08770;">1</span><span>] = </span><span style="color:#d08770;">0xc4c21b6</span><span>;
+</span><span>      out_flag[</span><span style="color:#d08770;">2</span><span>] = </span><span style="color:#d08770;">0x256d30a8</span><span>;
+</span><span>      out_flag[</span><span style="color:#d08770;">3</span><span>] = </span><span style="color:#d08770;">0x385968b3</span><span>;
+</span><span>      out_flag[</span><span style="color:#d08770;">4</span><span>] = </span><span style="color:#d08770;">0x446880</span><span>;
+</span><span>      out_flag[</span><span style="color:#d08770;">5</span><span>] = </span><span style="color:#d08770;">0x7e590cb9</span><span>;
+</span><span>      out_flag[</span><span style="color:#d08770;">6</span><span>] = </span><span style="color:#d08770;">0x5f3753a2</span><span>;
+</span><span>      </span><span style="color:#b48ead;">for </span><span>(i = </span><span style="color:#d08770;">0</span><span>; i &lt; </span><span style="color:#d08770;">7</span><span>; i = i + </span><span style="color:#d08770;">1</span><span>) {
+</span><span>         out_flag[i] = out_flag[i] ^ </span><span style="color:#d08770;">0x5f3759df</span><span>;
+</span><span>      }
+</span><span>    }
+</span><span>  }
+</span><span>  </span><span style="color:#b48ead;">return</span><span> output_state;
+</span><span>}
+</span></code></pre>
+<p>So that <code>state</code> value seems to rely on the current button inputs. If you click the correct sequence of buttons, it'll spit out the flag. If you went really far and <a href="https://libctru.devkitpro.org/hid_8h.html#a2f80701c36e79c0640d91c788feee0b3aa7b3a3d0503a46bec51c6e3da95747cc">checked the bitmask of each button</a>, you'd find that the function is actually searching for the Konami Code...</p>
+<p>Anyway, let's move on to that flag. If the Konami Code is successfully input, the function will write some interesting values into the output buffer and then XOR those values with a constant (which is, as an Easter Egg, the <a href="https://en.wikipedia.org/wiki/Fast_inverse_square_root">Quake inverse square root constant</a>) and spit that out. Do that XOR yourself and you'll have the flag.</p>
+<h2 id="a-last-minute-disaster"><a class="zola-anchor" href="#a-last-minute-disaster" aria-label="Anchor link for: a-last-minute-disaster">A last-minute disaster</a></h2>
+<p>Having spent two Saturdays building this challenge, the morning before the CTF was set to start I got a message from a colleague:</p>
+<pre style="background-color:#2b303b;color:#c0c5ce;"><code><span>Them:
+</span><span>
+</span><span>Oh shit
+</span><span>What&#39;s the flag
+</span><span>Bruh is it $THE_FLAG
+</span><span>I just did ``strings file.bin``
+</span><span>
+</span><span>Me:
+</span><span>
+</span><span>Is my challenge actually that broken
+</span><span>Yes that&#39;s the flag
+</span></code></pre>
+<p>And sure enough:</p>
+<pre data-lang="bash" style="background-color:#2b303b;color:#c0c5ce;" class="language-bash "><code class="language-bash" data-lang="bash"><span style="color:#bf616a;">$</span><span> strings file.bin
+</span><span style="color:#bf616a;">l1ng_1s_
+</span><span style="color:#bf616a;">fUn!</span><span>}
+</span><span style="color:#bf616a;">hackD
+</span><span style="color:#bf616a;">xi{SwiZz
+</span></code></pre>
+<p>This is how I learned not to leave your strings in plaintext. All of this incredibly complicated obfuscation couldn't stop people from discovering the flag, as four-byte segments had to still be present in the obfuscated file. I quickly added the XORing function and spent the next hour rebuilding the challenge (it shouldn't be too surprising that it's a <em>major</em> pain in the neck to build).</p>
+<h2 id="conclusion"><a class="zola-anchor" href="#conclusion" aria-label="Anchor link for: conclusion">Conclusion</a></h2>
+<p>Although not my first CTF challenge to be widely distributed, this was by far my most ambitious, and it shows along the way with the stacking mistakes making it inaccessible to all but the most talented reverse engineers. This was also my first long-form article since 2016, in which I wrote about some concepts of 3DS security without having formed a grasp on programming.</p>
+<p>Reflecting on the value of writing, it's interesting that in terms of pure time investment writing this article probably took me about as long as making the challenge in the first place. Grabbing citations, checking notes, reverse engineering the challenge myself and making diagrams... It's tough work, but by doing it I get to share everything I learned.</p>
+<p>If you've made it to the end of this article, I applaud your interest (or possible insanity). There will be more articles to come soon on some challenges I wrote earlier in 2022. In order to whet your appetite, I'll share the following teaser:</p>
+<p><img src="https://upload.wikimedia.org/wikipedia/commons/thumb/1/15/Intel_Itanium_logo.svg/394px-Intel_Itanium_logo.svg.png" alt="Teaser" /></p>
+
+</article>
+
+    </main>
+    <div id="footer"></div>
+</body>
+
+</html>

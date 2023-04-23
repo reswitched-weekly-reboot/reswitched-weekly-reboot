@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>ReSwitched Weekly</title>
+    <link rel="stylesheet" href="https://reswitched-weekly-reboot.github.io/base.css">
+</head>
+
+<body>
+    <div id="header">
+        <nav>
+        <a href="https://reswitched-weekly-reboot.github.io/about/">About</a>
+        <a href="https://reswitched-weekly-reboot.github.io/posts/">Blog</a>
+        <a href="https://reswitched-weekly-reboot.github.io/tags/">Tags</a></nav>
+    </div>
+    <main>
+<h1>Welcome to the first edition of ReSwitched Weekly (reboot)</h1>
+<article>
+    <p><a href="https://reswitched.github.io/blog/">Reswitched Weekly</a> was a blog covering the Nintendo Switch hacking scene as it developed from the point of view of the ReSwitched discord. It died out because the news slowed down. This attempted revival of ReSwitched Weekly continues the spirit of the original while expanding outside just the switch.  The ReSwitched Weekly reboot will consist of 2 formats - roundups, which will highlight the happenings in the community in the past week, and in-depth blog posts discussing a specific topic or event by an RS member. We're hoping to get lots of our great community members involved, showing off the cool things they have been working on. Let's start strong with a roundup of the 8th week of 2023!</p>
+<span id="continue-reading"></span>
+<p>Welcome to the attempted revival of ReSwitched Weekly.</p>
+<h2 id="news"><a class="zola-anchor" href="#news" aria-label="Anchor link for: news">News</a></h2>
+<h3 id="google-summer-of-code"><a class="zola-anchor" href="#google-summer-of-code" aria-label="Anchor link for: google-summer-of-code">Google Summer of Code</a></h3>
+<p>Google Summer of Code has released its <a href="https://opensource.googleblog.com/2023/02/mentor-organizations-announced-for.html">list of mentoring organizations</a> for 2023. @Pokemod97 did it in the summer of 2021 and highly recommends it. For those who are unaware, Google Summer of Code is a program where Google pays college students to work on a project for an open-source organization, under a mentor, during the summer. It's a great alternative to an internship especially because it's available for multiple countries and fully remote. @Pokemod97 recommends contacting the organizations early and figure what you can do for them before applying. Good luck to all the college students who are applying.</p>
+<h2 id="til"><a class="zola-anchor" href="#til" aria-label="Anchor link for: til">TIL</a></h2>
+<p>Today I Learned is a section that's gonna cover a selection of the interesting things the writers have found out about since the last roundup. Expect this to be a fun selection of factoids related to the world of hacking and much more!</p>
+<h3 id="gold-vs-gnu-ld-spoiler-mold-wins"><a class="zola-anchor" href="#gold-vs-gnu-ld-spoiler-mold-wins" aria-label="Anchor link for: gold-vs-gnu-ld-spoiler-mold-wins">Gold vs GNU ld (spoiler: mold wins)</a></h3>
+<p>Gold is a <a href="https://opensource.googleblog.com/2008/04/gold-google-releases-new-and-improved.html">Google</a> project that intends to create a linker faster than GNU ld and to make it a part of binutils.The project was started in 2008, but even though it has a ton of history attached to its name, don't get too excited. Unfortunately, it has fallen out of favor at Google, as they wish to focus more on LLVM for now. Fedora has split it into its own package instead of Binutils because of <a href="https://www.phoronix.com/news/GNU-Gold-Stagnate-F31">&quot;bitrot&quot;</a>. Don't worry, however, if you need to link things faster. Even though gold is likely already on your system, it is certainly not the only option, as <a href="https://github.com/rui314/mold">mold</a> shows much more promise, both in the performance and the maintenance department. If you are looking to understand how gold and mold are designed for speed, you can check out <a href="https://www.airs.com/blog/archives/39">this blog post</a> by the author of gold, and mold's <a href="https://github.com/rui314/mold/blob/main/docs/design.md">design notes</a>.</p>
+<h2 id="updates"><a class="zola-anchor" href="#updates" aria-label="Anchor link for: updates">Updates</a></h2>
+<p>This week, the Nintendo Switch received an update to the Horizon OS version 16.0.0, spelling a bit of trouble for homebrew users once again. While Atmosphère has been updated as swiftly as ever, the update came with some changes that break existing homebrew too, many of which will need updates.</p>
+<p>The pl:s service now no longer gives applications access to the Switch's system fonts, meaning many homebrew applications will need to switch to the much more contested pl:u service. One of the most notable applications that needed this change is the Tesla overlay system. Unfortunately, the amount of processes that can access the service is limited to 5, of which the operating system uses 3 by default, which would cause an issue when trying to run a game, overlays, and a homebrew application using this service at the same time. Fortunately, Atmosphère has implemented a workaround freeing one of the 3 sessions used by the system, which will land in a future pre-release.</p>
+<p>The ncm service has also received some updates breaking compatibility with homebrew that makes use of this service, which will need to be re-compiled with a new version of libnx.</p>
+<p>However, not all updates to the OS have been homebrew-breaking. One notable update, in particular, happened in the Horizon Kernel, fixing a long-standing vulnerability that while not useful on its own, could have spelled trouble for the security of the system if combined with another exploit (of which there are not many, to be fair). Before 16.0.0, the kernel mapped its memory as both writable and executable into a set place in memory, allowing an attacker that already has some type of code execution in the kernel to bypass mitigations such as KASLR. While the kernel needs to do this at the start, the flaw stems from the fact that this area never seems to get unmapped. The fix seems to have been incidental, as it coincides with the change of the related code to be more versatile for use on new devices. Whatever the motivation behind this might be, it is yet another of the very few bugs remaining in the kernel being fixed as the kernel team at Nintendo keeps firing from all cylinders to create one of the most interesting pieces of software in modern history.</p>
+<p>Of course, we can't fit all the goodies that have been added in 16.0.0 into this article, so if you're interested, go check a fuller changelog in the <a href="https://switchbrew.org/wiki/16.0.0">usual places</a>.</p>
+<h2 id="projects"><a class="zola-anchor" href="#projects" aria-label="Anchor link for: projects">Projects</a></h2>
+<h3 id="tetris-mbc5"><a class="zola-anchor" href="#tetris-mbc5" aria-label="Anchor link for: tetris-mbc5">Tetris MBC5</a></h3>
+<p><a href="https://github.com/Y2K-x/tetris-gb-disasm/tree/mbc5">An interesting project by a ReSwitched member Y2K</a> aims to extend the classic Tetris Gameboy disassembly to allow for more modding. This improved version outputs a ROM in the MBC5 format and modifies the game code to allow more space for various experiments. By default, Tetris takes up all the address space available from the CPU for the cart. Memory Bank Controllers(MBC) work around this by changing the memory banks that the CPU is accessing in the cart on command. This is a jumping-off point for @Y2K to make further modifications to the game such as porting Tetris Gym to the Gameboy version of Tetris.</p>
+<h2 id="dsi-under-attack"><a class="zola-anchor" href="#dsi-under-attack" aria-label="Anchor link for: dsi-under-attack">DSi under Attack</a></h2>
+<p><a href="https://icosahedron.website/@pcy/109914279298940511">@pcy has successfully dumped the bootroms of the ARM9 and ARM7 CPUs of the DSi.</a>
+These dumps are the first steps to finding a jailbreak attack on the bootroms, which is the subject of pcy's master's thesis. Such an attack would allow recovery from bricks caused by dead NANDs, as the latter suffers from bad wear leveling issues. Additional shoutout to @stuckpixel for his independent effort to dump the DSi bootrom.</p>
+<h2 id="other-blogposts"><a class="zola-anchor" href="#other-blogposts" aria-label="Anchor link for: other-blogposts">Other Blogposts</a></h2>
+<p>Shoutout to @Retroid's <a href="https://www.da.vidbuchanan.co.uk/blog/netflix-on-asahi.html">blogpost about getting widevine running under Asahi Linux</a>. </p>
+<h2 id="coming-up"><a class="zola-anchor" href="#coming-up" aria-label="Anchor link for: coming-up">Coming up</a></h2>
+<h3 id="xinu-aarch64"><a class="zola-anchor" href="#xinu-aarch64" aria-label="Anchor link for: xinu-aarch64">Xinu AARCH64</a></h3>
+<p>The operating systems class Pokemod97 is currently taking uses the <a href="https://xinu.cs.purdue.edu/">xinu</a> operating system as the testing ground for the class. They currently run it on their BeagleBone Black(arm32), however, they plan to port the system to aarch64 QEMU and later perhaps the Nintendo Switch (I mean hey, we're ReSwitched after all...). The progress made so far consists of modifying a <a href="https://github.com/Pokemod97/armv8-hello">bare metal qemu aarch64 hello world</a> project to use clang as the compiler.</p>
+
+</article>
+
+    </main>
+    <div id="footer"></div>
+</body>
+
+</html>
